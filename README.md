@@ -120,7 +120,6 @@ External: Serper.dev (Google SERP) · Google Places · ABINOX/industry directori
 | 地图 | Google Places Text Search | 按城市发现分销商，带地址/电话/网站 | 适合本地商户，补 SERP 盲区 |
 | 工商核验 | BrasilAPI / Minha Receita（CNPJ） | 官方名称、CNAE、地址、状态、母公司根号 | 免费、结构化、可验证 |
 | 去重 | rapidfuzz + tldextract + 规则 + 向量（可选） | 名称/域名/集团识别 | 纯字符串匹配会误杀，纯向量不可解释 |
-| LLM | OpenAI 兼容接口（GPT-4o-mini / DeepSeek / Qwen） | 查询扩展、页面分类、字段抽取、匹配理由 | 必须有 JSON schema + 证据引用，失败可回退规则 |
 | 任务 | 进程内 asyncio worker + 可恢复 run 表 | 70 分钟内不引入 Redis/Celery | 生产再换 Celery/RQ |
 
 ---
@@ -146,7 +145,7 @@ External: Serper.dev (Google SERP) · Google Places · ABINOX/industry directori
 }
 ```
 
-> 实现方式：产品字典（人工维护）+ LLM 归一化。NCM 与葡语词表是业务知识，不能完全交给模型。
+> 实现方式：产品字典（人工维护）+ 归一化。NCM 与葡语词表是业务知识，不能完全交给模型。
 
 ### Stage 1 — 查询生成（Query Expansion）
 
@@ -162,7 +161,6 @@ External: Serper.dev (Google SERP) · Google Places · ABINOX/industry directori
 | 英文补充 | `stainless steel distributor Brazil` / `stainless flat products Brazil importer` |
 | 目录/展会 | `site:abinox.org.br associado inox` / `expositor feira metalurgia inox` |
 
-LLM 负责扩展长尾查询与葡语同义词；模板保证覆盖率与可复现性。每条查询记录来源、语言、预期客户类型，便于后续归因。
 
 ### Stage 2 — 多源发现（Discovery Fan-out）
 
@@ -208,7 +206,7 @@ Candidate {
 | phones | 巴西格式 `+55 (11) 9xxxx-xxxx` | 归一 E.164 |
 | address / CEP | 正则 + 页脚 | 用于地图与州筛选 |
 | CNPJ | `\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}` | 强标识，用于核验与去重 |
-| products | 关键词 + LLM 抽取 | 必须保留原文证据 |
+| products | 关键词 | 必须保留原文证据 |
 | social | LinkedIn / Instagram / Facebook | 只取公司主页 |
 | import signals | `importado`, `importação`, `representante`, 外国钢厂名 | 评分依据 |
 | tech signals | 建站语言、版权年份、是否有电商 | 辅助判断活跃度 |
@@ -234,11 +232,10 @@ Candidate {
 2. **CNAE 映射客户类型**：如 `46.71-2`（金属及金属矿批发）、`24.41`（冶金）等，作为分类强特征。
 3. **Google Places**：补电话、地址、营业状态、评分/评论数（规模代理指标）。
 4. **贸易信号（可选）**：Comex Stat 提供 NCM × 国家/州的聚合，不提供进口商名称；若预算允许接入 Volza/ImportGenius 获取提单进口商。
-5. **官网二次抓取**：用 LLM 判断是否提到进口、库存、加工能力、下游行业。
 
 ### Stage 5 — 分类与评分（Classify & Score）
 
-**分类**：规则优先（关键词/CNPJ/CNAE），LLM 兜底并输出 `type + confidence + evidence_quote`。硬过滤类型直接淘汰。
+**分类**：规则优先（关键词/CNPJ/CNAE）。硬过滤类型直接淘汰。
 
 **匹配评分**（0–100，可解释）：
 
@@ -261,13 +258,6 @@ Score = 0.30 × ProductFit     产品线/材质/形态是否匹配
 | StrategicFit | 食品/石化/造纸/造船/建筑 | 与不锈钢无关的行业 |
 
 分级：`A ≥ 75`，`B 55–74`，`C 35–54`，`D < 35`（默认只导出 A/B，C 留观察）。
-
-**防幻觉**：
-
-- LLM 只能从抓取文本中抽取；每个判断必须返回 `evidence_quote` + `source_url`。
-- 结构化输出用 JSON Schema 校验；失败重试 1 次，再失败回退规则。
-- 邮箱、电话、CNPJ 等硬字段**只允许正则/API 产生**，不允许 LLM 生成。
-- 评分权重是业务配置，不由 LLM 自由决定；LLM 只负责解释与边缘判断。
 
 ---
 
@@ -444,7 +434,6 @@ Score = 0.30 × ProductFit     产品线/材质/形态是否匹配
 - **数据真实性**：
   - 未知字段一律 `null`，不猜测、不补全。
   - 邮箱/电话/CNPJ 只来自页面原文或官方 API。
-  - LLM 结论必须附 `evidence_quote` 与 `source_url`。
   - 每条记录可追溯到「哪个查询 → 哪个来源 → 哪个页面 → 何时抓取」。
 - **密钥管理**：`.env` 不入库；日志脱敏；导出不含密钥。
 
